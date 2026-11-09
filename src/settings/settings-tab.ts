@@ -1,9 +1,22 @@
-import { PluginSettingTab, Setting, TFile } from "obsidian";
-import { Logger } from "src/logger";
-import ObsidianDiscordRPC from "src/main";
+import { PluginSettingTab, Setting } from "obsidian";
+import { Logger } from "../logger";
+import type ObsidianDiscordRPC from "../main";
 
 export class DiscordRPCSettingsTab extends PluginSettingTab {
   public logger: Logger = new Logger();
+
+  private refreshActivity(plugin: ObsidianDiscordRPC): void {
+    const file = plugin.currentFile;
+    if (!file) {
+      return;
+    }
+
+    void plugin.setActivity(
+      this.app.vault.getName(),
+      file.basename,
+      file.extension
+    );
+  }
 
   display(): void {
     let { containerEl } = this;
@@ -46,11 +59,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
             this.logger.logIgnoreNoNotice("Vault Name is no longer Visible");
           }
 
-          plugin.setActivity(
-            this.app.vault.getName(),
-            plugin.currentFile.basename,
-            plugin.currentFile.extension
-          );
+          this.refreshActivity(plugin);
         })
       );
 
@@ -64,11 +73,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
           plugin.settings.customVaultName = value;
           plugin.saveData(plugin.settings);
 
-          plugin.setActivity(
-            this.app.vault.getName(),
-            plugin.currentFile.basename,
-            plugin.currentFile.extension
-          );
+          this.refreshActivity(plugin);
         })
       );
 
@@ -89,11 +94,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
               this.logger.logIgnoreNoNotice("File Name is no longer Visable");
             }
 
-            plugin.setActivity(
-              this.app.vault.getName(),
-              plugin.currentFile.basename,
-              plugin.currentFile.extension
-            );
+            this.refreshActivity(plugin);
           })
       );
 
@@ -107,11 +108,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
             plugin.settings.showFileExtension = value;
             plugin.saveData(plugin.settings);
 
-            plugin.setActivity(
-              this.app.vault.getName(),
-              plugin.currentFile.basename,
-              plugin.currentFile.extension
-            );
+            this.refreshActivity(plugin);
           })
       );
 
@@ -126,11 +123,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
           plugin.settings.useLoadedTime = value;
           plugin.saveData(plugin.settings);
 
-          plugin.setActivity(
-            this.app.vault.getName(),
-            plugin.currentFile.basename,
-            plugin.currentFile.extension
-          );
+          this.refreshActivity(plugin);
         });
       });
 
@@ -147,11 +140,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
             plugin.settings.autoHideStatusBar = value;
             plugin.saveData(plugin.settings);
 
-            plugin.setActivity(
-              this.app.vault.getName(),
-              plugin.currentFile.basename,
-              plugin.currentFile.extension
-            );
+            this.refreshActivity(plugin);
           });
       });
     
@@ -165,11 +154,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
           plugin.settings.showConnectionTimer = value;
           plugin.saveData(plugin.settings);
 
-          plugin.setActivity(
-            this.app.vault.getName(),
-            plugin.currentFile.basename,
-            plugin.currentFile.extension
-          );
+          this.refreshActivity(plugin);
           // needed to make timer disappear, otherwise it will freeze
           plugin.statusBar.displayState(plugin.getState(), plugin.settings.autoHideStatusBar);
         });
@@ -185,12 +170,9 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
         boolean.setValue(plugin.settings.connectOnStart).onChange((value) => {
           plugin.settings.connectOnStart = value;
           plugin.saveData(plugin.settings);
+          plugin.setAutoReconnect(value);
 
-          plugin.setActivity(
-            this.app.vault.getName(),
-            plugin.currentFile.basename,
-            plugin.currentFile.extension
-          );
+          this.refreshActivity(plugin);
         });
       });
 
@@ -209,11 +191,7 @@ export class DiscordRPCSettingsTab extends PluginSettingTab {
             this.logger.logIgnoreNoNotice("Notices Disabled");
           }
 
-          plugin.setActivity(
-            this.app.vault.getName(),
-            plugin.currentFile.basename,
-            plugin.currentFile.extension
-          );
+          this.refreshActivity(plugin);
         })
       );
   }

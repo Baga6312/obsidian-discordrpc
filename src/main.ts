@@ -1,11 +1,13 @@
-import { Client } from "discord-rpc";
-import { Plugin, PluginManifest, TFile } from "obsidian";
+import type { Client } from "discord-rpc";
+import * as path from "path";
+import { FileSystemAdapter, Plugin, PluginManifest, TFile } from "obsidian";
 import { Logger } from "./logger";
 import { DiscordRPCSettings, PluginState } from "./settings/settings";
 import { DiscordRPCSettingsTab } from "./settings/settings-tab";
 import { StatusBar } from "./status-bar";
 
 export default class ObsidianDiscordRPC extends Plugin {
+  private static readonly reconnectInterval = 5000;
   public state: PluginState;
   public settings: DiscordRPCSettings;
   public statusBar: StatusBar;
@@ -14,6 +16,8 @@ export default class ObsidianDiscordRPC extends Plugin {
   public currentFile: TFile;
   public loadedTime: Date;
   public lastSetTime: Date;
+  private reconnectRequested = false;
+  private reconnectFailureReported = false;
 
   setState(state: PluginState) {
     this.state = state;
@@ -21,6 +25,13 @@ export default class ObsidianDiscordRPC extends Plugin {
 
   getState(): PluginState {
     return this.state;
+  }
+
+  setAutoReconnect(enabled: boolean): void {
+    this.reconnectRequested = enabled;
+    if (enabled && this.getState() === PluginState.disconnected) {
+      void this.connectDiscord();
+    }
   }
 
   public getApp(): any {
@@ -47,8 +58,16 @@ export default class ObsidianDiscordRPC extends Plugin {
       }
     }, 500));
 
+    this.registerInterval(window.setInterval(() => {
+      if (this.reconnectRequested && this.getState() === PluginState.disconnected) {
+        void this.connectDiscord();
+      }
+    }, ObsidianDiscordRPC.reconnectInterval));
+
     this.registerDomEvent(statusBarEl, "click", async () => {
       if (this.getState() == PluginState.disconnected) {
+        this.reconnectRequested = true;
+        this.reconnectFailureReported = false;
         await this.connectDiscord();
       } else if (this.getState() == PluginState.connected) {
         await this.disconnectDiscord();
@@ -60,7 +79,11 @@ export default class ObsidianDiscordRPC extends Plugin {
     this.addCommand({
       id: "reconnect-discord",
       name: "Reconnect to Discord",
-      callback: async () => await this.connectDiscord(),
+      callback: async () => {
+        this.reconnectRequested = true;
+        this.reconnectFailureReported = false;
+        await this.connectDiscord();
+      },
     });
 
     this.addCommand({
@@ -69,23 +92,14 @@ export default class ObsidianDiscordRPC extends Plugin {
       callback: async () => await this.disconnectDiscord(),
     });
 
+    this.setState(PluginState.disconnected);
+    this.statusBar.displayState(
+      this.getState(),
+      this.settings.autoHideStatusBar
+    );
+
     if (this.settings.connectOnStart) {
-      await this.connectDiscord();
-
-      let activeLeaf = this.app.workspace.activeLeaf;
-      let files: TFile[] = this.app.vault.getMarkdownFiles();
-
-      files.forEach((file) => {
-        if (file.basename === activeLeaf.getDisplayText()) {
-          this.onFileOpen(file);
-        }
-      });
-    } else {
-      this.setState(PluginState.disconnected);
-      this.statusBar.displayState(
-        this.getState(),
-        this.settings.autoHideStatusBar
-      );
+      this.setAutoReconnect(true);
     }
   }
 
@@ -101,18 +115,21 @@ export default class ObsidianDiscordRPC extends Plugin {
   }
 
   async onunload() {
+    this.reconnectRequested = false;
     await this.saveData(this.settings);
-    this.rpc.clearActivity();
-    this.rpc.destroy();
+    if (this.rpc) {
+      this.rpc.clearActivity();
+      this.rpc.destroy();
+    }
   }
 
   async connectDiscord(): Promise<void> {
+    if (this.getState() === PluginState.connecting) {
+      return;
+    }
+
     this.loadedTime = new Date();
     this.lastSetTime = new Date();
-
-    this.rpc = new Client({
-      transport: "ipc",
-    });
 
     this.setState(PluginState.connecting);
     this.statusBar.displayState(
@@ -120,16 +137,52 @@ export default class ObsidianDiscordRPC extends Plugin {
       this.settings.autoHideStatusBar
     );
 
-    this.rpc.once("ready", () => {
-      this.setState(PluginState.connected);
-      this.statusBar.displayState(
-        this.getState(),
-        this.settings.autoHideStatusBar
-      );
-      this.logger.log("Connected to Discord", this.settings.showPopups);
-    });
-
     try {
+      if (!(this.app.vault.adapter instanceof FileSystemAdapter)) {
+        throw new Error("The vault does not use a local file-system adapter");
+      }
+
+      const rpcPath = path.join(
+        this.app.vault.adapter.getBasePath(),
+        this.manifest.dir,
+        "discord-rpc.js"
+      );
+      const nativeProcess = process as NodeJS.Process & {
+        getBuiltinModule?: (name: string) => {
+          createRequire(filename: string): NodeRequire;
+        };
+        mainModule?: { require(id: string): unknown };
+      };
+      let rpcModule: { Client: typeof Client };
+
+      if (nativeProcess.getBuiltinModule) {
+        const nodeRequire =
+          nativeProcess.getBuiltinModule("module").createRequire(rpcPath);
+        rpcModule = nodeRequire(rpcPath) as { Client: typeof Client };
+      } else if (nativeProcess.mainModule) {
+        rpcModule = nativeProcess.mainModule.require(rpcPath) as {
+          Client: typeof Client;
+        };
+      } else {
+        throw new Error("Native Node module loading is unavailable");
+      }
+
+      const RpcClient = rpcModule.Client;
+      this.rpc = new RpcClient({
+        transport: "ipc",
+      });
+
+      this.rpc.once("ready", () => {
+        this.setState(PluginState.connected);
+        this.statusBar.displayState(
+          this.getState(),
+          this.settings.autoHideStatusBar
+        );
+        this.reconnectRequested = false;
+        this.reconnectFailureReported = false;
+        this.logger.log("Connected to Discord", this.settings.showPopups);
+      });
+
       await this.rpc.login({
         clientId: "763813185022197831",
       });
@@ -140,13 +193,30 @@ export default class ObsidianDiscordRPC extends Plugin {
         this.getState(),
         this.settings.autoHideStatusBar
       );
-      this.logger.log("Failed to connect to Discord", this.settings.showPopups);
+      if (this.rpc) {
+        this.rpc.destroy();
+        this.rpc = undefined;
+      }
+
+      const message =
+        error instanceof Error ? error.message : String(error);
+      console.error("discordrpc: Failed to connect to Discord", error);
+      this.logger.log(
+        `Failed to connect to Discord: ${message}`,
+        this.settings.showPopups && !this.reconnectFailureReported
+      );
+      this.reconnectFailureReported = true;
     }
   }
 
   async disconnectDiscord(): Promise<void> {
-    this.rpc.clearActivity();
-    this.rpc.destroy();
+    this.reconnectRequested = false;
+    this.reconnectFailureReported = false;
+    if (this.rpc) {
+      this.rpc.clearActivity();
+      this.rpc.destroy();
+      this.rpc = undefined;
+    }
     this.setState(PluginState.disconnected);
     this.statusBar.displayState(
       this.getState(),

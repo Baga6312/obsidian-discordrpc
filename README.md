@@ -60,4 +60,4 @@ You can install the plugin via the Community Plugins tab within Obsidian.
 
 #### Manually installing the plugin
 
-- Copy over `main.js`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+- Copy over `main.js`, `discord-rpc.js`, and `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
