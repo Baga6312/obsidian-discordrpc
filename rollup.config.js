@@ -3,26 +3,27 @@ import {nodeResolve} from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
 import copy from 'rollup-plugin-copy';
+import path from 'path';
 const TEST_VAULT = 'test-vault/.obsidian/plugins/obsidian-discordrpc';
+// Native add-ons pulled in by discord-rpc (register-scheme) and ws (bufferutil,
+// utf-8-validate) cannot be loaded inside Obsidian, and building them needs
+// node-gyp + Python + MSVC. @rollup/plugin-commonjs hoists their guarded
+// `try { require(...) }` calls to top-level imports, so a missing module or a
+// stub that throws breaks the plugin at load time. Resolve them to pure-JS
+// shims in ./shims instead. (Real files rather than \0 virtual ids: commonjs
+// v15 strips the \0 prefix from its proxies and treats them as externals.)
+const NATIVE_SHIMS = {
+  'register-scheme': 'shims/register-scheme.js',
+  'bufferutil': 'shims/bufferutil.js',
+  'utf-8-validate': 'shims/utf-8-validate.js',
+  'node-gyp-build': 'shims/native-unavailable.js',
+  'bindings': 'shims/native-unavailable.js'
+};
 const optionalNativeModules = {
   name: 'optional-native-modules',
   resolveId(source) {
-    if (
-      source === 'bufferutil' ||
-      source === 'utf-8-validate' ||
-      source === 'node-gyp-build' ||
-      source === 'bindings'
-    ) {
-      return `\0${source}`;
-    }
-    return null;
-  },
-  load(id) {
-    if (id === '\0node-gyp-build' || id === '\0bindings') {
-      return 'export default function optionalNativeModule() { throw new Error("Optional native module is unavailable"); };';
-    }
-    if (id === '\0bufferutil' || id === '\0utf-8-validate') {
-      return 'export default {};';
+    if (Object.prototype.hasOwnProperty.call(NATIVE_SHIMS, source)) {
+      return path.resolve(NATIVE_SHIMS[source]);
     }
     return null;
   },

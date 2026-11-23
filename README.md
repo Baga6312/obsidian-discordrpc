@@ -61,3 +61,12 @@ You can install the plugin via the Community Plugins tab within Obsidian.
 #### Manually installing the plugin
 
 - Copy over `main.js`, `discord-rpc.js`, and `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+
+#### Building from source
+
+```sh
+npm install
+npm run build
+```
+
+The built files are written to `dist/`. No Python or C++ build tools are needed: `.npmrc` skips the optional native dependencies (`register-scheme`, `bufferutil`, `utf-8-validate`) and `rollup.config.js` bundles pure-JS shims for them.
